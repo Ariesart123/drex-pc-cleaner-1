@@ -42,9 +42,11 @@ jobs:
           if ($tag -match '^v(\d+\.\d+\.\d+)$') {
             $version = $matches[1]
           } else {
-            # Generate version from date for non-tag builds
-            $version = (Get-Date -Format "yyyy.MM.dd-HHmm")
+            # Generate version from date for non-tag builds (no colons, valid for Git tags)
+            $version = (Get-Date -Format "yyyyMMdd-HHmmss")
           }
+          # Sanitize: only alphanumeric, dash, underscore
+          $version = $version -replace '[^a-zA-Z0-9_-]', '-'
           Write-Host "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "version=$version" >> $env:GITHUB_OUTPUT
 
@@ -66,7 +68,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: DREX_PC_CLEANER_${{ env.VERSION }}
+          name: DREX_PC_CLEANER_${{ steps.version.outputs.version }}
           path: |
             out/framework-dependent/DREX_PC_CLEANER.exe
             out/self-contained/DREX_PC_CLEANER.exe
@@ -99,10 +101,10 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly-${{ env.VERSION }}
-          name: DREX PC Cleaner (Nightly) ${{ env.VERSION }}
+          tag_name: nightly-${{ steps.version.outputs.version }}
+          name: DREX PC Cleaner (Nightly) ${{ steps.version.outputs.version }}
           body: |
-            ## Nightly Build ${{ env.VERSION }}
+            ## Nightly Build ${{ steps.version.outputs.version }}
 
             ⚠️ **This is an automated nightly build** - may contain experimental changes.
 
