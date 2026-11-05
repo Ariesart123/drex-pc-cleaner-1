@@ -58,4 +58,4 @@ packages/
 
 # Google OAuth credentials
 client_secret*.json
-google_credentials.json
+google_credentials.jsonsrc/DrexCleaner.Auth/

@@ -32,10 +32,8 @@
   <ItemGroup>
     <!-- Google OAuth 2.0 Authentication -->
     <PackageReference Include="Google.Apis.Auth" Version="1.74.0" />
-    <PackageReference Include="Google.Apis.Oauth2.v2" Version="1.74.0" />
-    <!-- JSON serialization for settings/profile -->
-    <PackageReference Include="System.Text.Json" Version="9.0.0" />
-    <!-- Cryptography for password hashing -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.0" />
+    <PackageReference Include="Google.Apis.Oauth2.v2" Version="1.74.0.1869" />
+    <!-- Cryptography for password hashing - upgrade to patched version -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.5" />
   </ItemGroup>
 </Project>
