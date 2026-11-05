@@ -35,10 +35,5 @@
     <PackageReference Include="Google.Apis.Oauth2.v2" Version="1.74.0.1869" />
     <!-- Cryptography for password hashing - upgrade to patched version -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.5" />
-    <!-- JSON extensions for HttpContent.ReadFromJsonAsync -->
-    <PackageReference Include="System.Net.Http.Json" Version="9.0.0" />
-    <!-- ZIP compression -->
-    <PackageReference Include="System.IO.Compression" Version="9.0.0" />
-    <PackageReference Include="System.IO.Compression.ZipFile" Version="9.0.0" />
   </ItemGroup>
 </Project>
