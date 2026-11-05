@@ -24,8 +24,7 @@ public sealed class LoginForm : Form
     readonly PictureBox _logo = new();
     readonly CheckBox _rememberMe = new();
     bool _isRegisterMode = false;
-    CancellationTokenSource? _authCts;
-
+    
     public UserProfile? AuthenticatedProfile { get; private set; }
 
     public LoginForm()
@@ -526,9 +525,4 @@ public sealed class LoginForm : Form
         catch { return false; }
     }
 
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        _authCts?.Cancel();
-        base.OnFormClosing(e);
     }
-}

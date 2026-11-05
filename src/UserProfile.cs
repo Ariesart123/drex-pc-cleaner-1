@@ -57,7 +57,7 @@ public static class UserProfileStore
 
     public static UserProfile? CurrentProfile { get; internal set; }
 
-    public static UserProfile Load()
+    public static UserProfile? Load()
     {
         try
         {

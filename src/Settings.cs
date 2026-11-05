@@ -13,10 +13,18 @@ public sealed class Settings
     public bool UsbAutoScan { get; set; } = false;
     public bool FirstLaunchCompleted { get; set; } = false;
     public bool AutoLoginEnabled { get; set; } = true;
+    public bool PortableMode { get; set; } = false;
 
-    static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DrexPcCleaner");
+    static string? _overrideDir;
+    static readonly string DefaultDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DrexPcCleaner");
+    static string Dir => _overrideDir ?? DefaultDir;
     static readonly string FilePath = Path.Combine(Dir, "settings.json");
     public static string DataDir => Dir;
+
+    public static void SetPortableDirectory(string path)
+    {
+        _overrideDir = path;
+    }
 
     public static Settings Load()
     {
@@ -27,6 +35,8 @@ public sealed class Settings
     {
         try { Directory.CreateDirectory(Dir); File.WriteAllText(FilePath, JsonSerializer.Serialize(this)); } catch { }
     }
+
+    public static bool IsPortable => !string.IsNullOrEmpty(_overrideDir);
 }
 
 // Small append-only history log, rotated at 128 KB (keeps one .old file).

@@ -5,10 +5,19 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Portable mode: --portable or running from same dir as executable
+        bool portable = args.Contains("--portable");
+        if (portable)
+        {
+            string exeDir = Path.GetDirectoryName(Environment.ProcessPath ?? Application.ExecutablePath) ?? "";
+            Settings.SetPortableDirectory(exeDir);
+        }
+
         if (args.Contains("--autoclean")) { HeadlessClean(); return; }
         try
         {
-            var mutex = new Mutex(true, "DREX_PC_CLEANER_SINGLE", out bool first);
+            string mutexName = Settings.IsPortable ? "DREX_PC_CLEANER_SINGLE_PORTABLE" : "DREX_PC_CLEANER_SINGLE";
+            var mutex = new Mutex(true, mutexName, out bool first);
             if (!first)
             {
                 if (args.Contains("--elevated"))
