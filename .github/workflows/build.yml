@@ -101,7 +101,8 @@ jobs:
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly-${{ steps.version.outputs.version }}
+          tag_name: nightly
+          target_commitish: main
           name: DREX PC Cleaner (Nightly) ${{ steps.version.outputs.version }}
           body: |
             ## Nightly Build ${{ steps.version.outputs.version }}
