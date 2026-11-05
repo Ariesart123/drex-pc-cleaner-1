@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -54,7 +55,7 @@ public static class UserProfileStore
     static readonly string ProfileFile = Path.Combine(Settings.DataDir, "user_profile.json");
     static readonly string SessionsFile = Path.Combine(Settings.DataDir, "sessions.json");
 
-    public static UserProfile? CurrentProfile { get; private set; }
+    public static UserProfile? CurrentProfile { get; internal set; }
 
     public static UserProfile Load()
     {
@@ -64,10 +65,23 @@ public static class UserProfileStore
             {
                 var json = File.ReadAllText(ProfileFile);
                 CurrentProfile = JsonSerializer.Deserialize<UserProfile>(json);
+                Debug.WriteLine($"[UserProfileStore] Loaded profile: {CurrentProfile?.Email ?? "null"}");
                 return CurrentProfile;
             }
+            Debug.WriteLine("[UserProfileStore] No profile file found");
         }
-        catch { }
+        catch (JsonException ex)
+        {
+            Debug.WriteLine($"[UserProfileStore] JSON deserialization error: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            Debug.WriteLine($"[UserProfileStore] File I/O error loading profile: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[UserProfileStore] Unexpected error loading profile: {ex.Message}");
+        }
         return null;
     }
 
@@ -80,8 +94,23 @@ public static class UserProfileStore
             var json = JsonSerializer.Serialize(profile, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(ProfileFile, json);
             CurrentProfile = profile;
+            Debug.WriteLine($"[UserProfileStore] Saved profile: {profile.Email}");
         }
-        catch { }
+        catch (IOException ex)
+        {
+            Debug.WriteLine($"[UserProfileStore] File I/O error saving profile: {ex.Message}");
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            Debug.WriteLine($"[UserProfileStore] JSON serialization error: {ex.Message}");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[UserProfileStore] Unexpected error saving profile: {ex.Message}");
+            throw;
+        }
     }
 
     public static void AddLoginHistory(LoginHistoryEntry entry)
@@ -94,6 +123,11 @@ public static class UserProfileStore
             if (profile.LoginHistory.Count > 100)
                 profile.LoginHistory = profile.LoginHistory.OrderByDescending(x => x.Timestamp).Take(100).ToList();
             Save(profile);
+            Debug.WriteLine($"[UserProfileStore] Added login history: {entry.Success} - {entry.UserAgent}");
+        }
+        else
+        {
+            Debug.WriteLine("[UserProfileStore] AddLoginHistory: No current profile");
         }
     }
 
@@ -111,6 +145,11 @@ public static class UserProfileStore
             if (profile.ActiveSessions.Count > 10)
                 profile.ActiveSessions = profile.ActiveSessions.OrderByDescending(x => x.CreatedAt).Take(10).ToList();
             Save(profile);
+            Debug.WriteLine($"[UserProfileStore] Added active session: {session.DeviceInfo}");
+        }
+        else
+        {
+            Debug.WriteLine("[UserProfileStore] AddActiveSession: No current profile");
         }
     }
 
@@ -119,8 +158,20 @@ public static class UserProfileStore
         var profile = CurrentProfile;
         if (profile != null)
         {
-            profile.ActiveSessions.RemoveAll(x => x.SessionId == sessionId);
-            Save(profile);
+            int removed = profile.ActiveSessions.RemoveAll(x => x.SessionId == sessionId);
+            if (removed > 0)
+            {
+                Save(profile);
+                Debug.WriteLine($"[UserProfileStore] Removed session: {sessionId}");
+            }
+            else
+            {
+                Debug.WriteLine($"[UserProfileStore] Session not found: {sessionId}");
+            }
+        }
+        else
+        {
+            Debug.WriteLine("[UserProfileStore] RemoveSession: No current profile");
         }
     }
 
@@ -129,8 +180,14 @@ public static class UserProfileStore
         var profile = CurrentProfile;
         if (profile != null)
         {
+            int count = profile.ActiveSessions.Count;
             profile.ActiveSessions.Clear();
             Save(profile);
+            Debug.WriteLine($"[UserProfileStore] Cleared all sessions: {count} removed");
+        }
+        else
+        {
+            Debug.WriteLine("[UserProfileStore] ClearAllSessions: No current profile");
         }
     }
 
@@ -138,6 +195,7 @@ public static class UserProfileStore
     {
         if (CurrentProfile != null)
         {
+            Debug.WriteLine($"[UserProfileStore] Signing out user: {CurrentProfile.Email}");
             AuthService.ClearRememberMeToken();
         }
         CurrentProfile = null;

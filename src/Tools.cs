@@ -274,6 +274,20 @@ public static class TaskSched
         return Run(a.ToArray());
     }
 
+    public static (bool ok, string msg) CreateDaily(string name, string time, string command, bool asSystem)
+    {
+        var a = new List<string> { "/Create", "/F", "/TN", name, "/SC", "DAILY", "/ST", time, "/TR", command };
+        if (asSystem) { a.Add("/RU"); a.Add("SYSTEM"); a.Add("/RL"); a.Add("HIGHEST"); }
+        return Run(a.ToArray());
+    }
+
+    public static (bool ok, string msg) CreateMonthly(string name, int dayOfMonth, string time, string command, bool asSystem)
+    {
+        var a = new List<string> { "/Create", "/F", "/TN", name, "/SC", "MONTHLY", "/D", dayOfMonth.ToString(), "/ST", time, "/TR", command };
+        if (asSystem) { a.Add("/RU"); a.Add("SYSTEM"); a.Add("/RL"); a.Add("HIGHEST"); }
+        return Run(a.ToArray());
+    }
+
     public static (bool ok, string msg) Delete(string name) => Run("/Delete", "/TN", name, "/F");
 
     public static string Status(string name)

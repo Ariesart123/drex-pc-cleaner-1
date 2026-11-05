@@ -97,7 +97,7 @@ public sealed partial class MainForm : Form
         };
 
         Hint();
-        return Stack((Header("Scanner", "DREX's own light scanner and quarantine. Complements — never replaces — Windows Defender."), false),
+        return Stack((MainForm.Header("Scanner", "DREX's own light scanner and quarantine. Complements — never replaces — Windows Defender."), false),
             (Bar(path, browse, scan, cancel, import, test), false), (Bar(tabScan, tabQ, quar, restore, del), false), (holder, true), (status, false));
     }
 }

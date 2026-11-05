@@ -51,6 +51,15 @@ public static class Theme
         p.CloseFigure();
         return p;
     }
+
+    public static Color Interpolate(Color a, Color b, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return Color.FromArgb(
+            (int)(a.R + (b.R - a.R) * t),
+            (int)(a.G + (b.G - a.G) * t),
+            (int)(a.B + (b.B - a.B) * t));
+    }
 }
 
 public static class AppIcon

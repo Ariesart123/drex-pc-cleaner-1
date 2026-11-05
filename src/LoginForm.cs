@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.IO;
-using System.Net;
 using System.Threading.Tasks;
 namespace Drex;
 
@@ -96,19 +95,23 @@ public sealed class LoginForm : Form
             using var pen = new Pen(Theme.Surf2, 1f);
             g.DrawPath(pen, path);
 
-            // Google "G" logo (simplified)
+            // Google "G" logo (simplified) - using TextRenderer to avoid DrawString issues
             using var font = Theme.F(18f, true);
             var text = "G";
             var textSize = TextRenderer.MeasureText(text, font);
-            var textRect = new Rectangle((_googleBtn.Width - textSize.Width) / 2 - 24, (52 - textSize.Height) / 2, textSize.Width, textSize.Height);
-            // Draw colored G
+            int centerX = _googleBtn.Width / 2;
+            int centerY = _googleBtn.Height / 2;
+            int textX = centerX - textSize.Width / 2;
+            int textY = centerY - textSize.Height / 2;
+
+            // Draw colored G using TextRenderer for better reliability
             var colors = new[] { Color.FromArgb(66, 133, 244), Color.FromArgb(219, 68, 55), Color.FromArgb(244, 180, 0), Color.FromArgb(66, 133, 244), Color.FromArgb(52, 168, 83), Color.FromArgb(219, 68, 55) };
             for (int i = 0; i < text.Length; i++)
             {
                 var c = text[i].ToString();
                 var cSize = TextRenderer.MeasureText(c, font);
                 using var br2 = new SolidBrush(colors[i % colors.Length]);
-                g.DrawString(c, font, br2, (52 - textSize.Width) / 2 + i * cSize.Width, (52 - textSize.Height) / 2);
+                TextRenderer.DrawText(g, c, font, new Rectangle(textX + i * cSize.Width, textY, cSize.Width, cSize.Height), colors[i % colors.Length], TextFormatFlags.NoPrefix);
             }
 
             var labelRect = new Rectangle(44, 0, _googleBtn.Width - 44, 52);
@@ -312,52 +315,28 @@ public sealed class LoginForm : Form
 
         try
         {
-            var authUrl = AuthService.GetGoogleAuthUrl();
-            var listener = new HttpListener();
-            listener.Prefixes.Add("http://localhost:54321/callback/");
-            listener.Start();
+            var result = await AuthService.InitiateGoogleAuthAsync();
 
-            Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
-
-            var context = await listener.GetContextAsync();
-            var response = context.Response;
-            var code = context.Request.QueryString["code"];
-            var error = context.Request.QueryString["error"];
-
-            string responseHtml;
-            if (!string.IsNullOrEmpty(code))
+            if (result == "AUTH_SUCCESS")
             {
-                responseHtml = "<html><body style='font-family:Segoe UI;background:#0A0E14;color:#F0F4F8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center'><h1 style='color:#00D4A0'>✓</h1><p>Authentication successful! You can close this window.</p></div></body></html>";
-                response.ContentType = "text/html";
-                var buffer = Encoding.UTF8.GetBytes(responseHtml);
-                response.ContentLength64 = buffer.Length;
-                await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                response.OutputStream.Close();
-                listener.Stop();
-
-                var result = await AuthService.HandleGoogleCallbackAsync(code);
-                if (result.Success)
+                // Load the profile that was saved during authentication
+                var profile = UserProfileStore.Load();
+                if (profile != null && profile.Provider == "google")
                 {
-                    AuthenticatedProfile = result.Profile;
+                    AuthenticatedProfile = profile;
                     DialogResult = DialogResult.OK;
                     Close();
                     return;
                 }
-                else
-                {
-                    ShowError(result.ErrorMessage);
-                }
+                ShowError("Authentication succeeded but profile not found");
+            }
+            else if (result == "AUTH_CANCELLED")
+            {
+                ShowError("Google authentication was cancelled");
             }
             else
             {
-                responseHtml = $"<html><body style='font-family:Segoe UI;background:#0A0E14;color:#F0F4F8;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center'><h1 style='color:#EF4444'>✗</h1><p>Authentication failed: {error}</p></div></body></html>";
-                response.ContentType = "text/html";
-                var buffer = Encoding.UTF8.GetBytes(responseHtml);
-                response.ContentLength64 = buffer.Length;
-                await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                response.OutputStream.Close();
-                listener.Stop();
-                ShowError($"Google authentication failed: {error}");
+                ShowError(result); // AUTH_ERROR: message
             }
         }
         catch (Exception ex)

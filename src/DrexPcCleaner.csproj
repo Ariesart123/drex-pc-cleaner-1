@@ -31,8 +31,8 @@
   </ItemGroup>
   <ItemGroup>
     <!-- Google OAuth 2.0 Authentication -->
-    <PackageReference Include="Google.Apis.Auth" Version="1.68.0" />
-    <PackageReference Include="Google.Apis.Oauth2.v2" Version="1.68.0.3203" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.74.0" />
+    <PackageReference Include="Google.Apis.Oauth2.v2" Version="1.74.0" />
     <!-- JSON serialization for settings/profile -->
     <PackageReference Include="System.Text.Json" Version="9.0.0" />
     <!-- Cryptography for password hashing -->

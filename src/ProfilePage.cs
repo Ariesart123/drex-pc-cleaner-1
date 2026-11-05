@@ -95,12 +95,23 @@ public static class ProfilePage
 
         var signOutBtn = new GButton("Sign Out") { Location = new Point(270, 156), Width = 120 };
         signOutBtn.Primary = false;
-        signOutBtn.Click += (s, e) =>
+        signOutBtn.Click += async (s, e) =>
         {
             if (MessageBox.Show(mainForm, "Sign out of your account? You'll need to sign in again next time.", "Sign Out", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
-                UserProfileStore.SignOut();
-                Application.Restart();
+                signOutBtn.Enabled = false;
+                signOutBtn.Text = "Signing out...";
+                var result = await AuthService.SignOutAsync();
+                if (result.Success)
+                {
+                    mainForm.HandleLogout();
+                }
+                else
+                {
+                    signOutBtn.Enabled = true;
+                    signOutBtn.Text = "Sign Out";
+                    MessageBox.Show(mainForm, $"Sign out failed: {result.ErrorMessage}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
         };
 
@@ -132,7 +143,7 @@ public static class ProfilePage
         var secTitle = L("Account Security", 12f, Theme.Txt, true, Theme.Surf);
         secTitle.Location = new Point(20, 16);
         var changePwdBtn = new GButton("Change Password") { Location = new Point(20, 56), Width = 160 };
-        changeBtn.Click += (s, e) => ShowChangePasswordDialog(profile, mainForm);
+        changePwdBtn.Click += (s, e) => ShowChangePasswordDialog(profile, mainForm);
         var sessionsBtn = new GButton("Manage Sessions") { Location = new Point(190, 56), Width = 160 };
         sessionsBtn.Primary = false;
         sessionsBtn.Click += (s, e) => ShowSessionsDialog(profile, mainForm);
@@ -183,7 +194,7 @@ public static class ProfilePage
         flow.Controls.Add(securityCard);
         flow.Controls.Add(activityCard);
 
-        return Stack((Header("Profile", "Manage your account, security, and activity"), false), (flow, true));
+        return Stack((MainForm.Header("Profile", "Manage your account, security, and activity"), false), (flow, true));
     }
 
     static void ShowEditProfileDialog(UserProfile profile, MainForm mainForm, Label nameLabel, Label emailLabel)
@@ -259,9 +270,15 @@ public static class ProfilePage
             Font = Theme.F(9.5f)
         };
 
-        var currentInput = Input("", 340) { UseSystemPasswordChar = true, PlaceholderText = "Current password" };
-        var newInput = Input("", 340) { UseSystemPasswordChar = true, PlaceholderText = "New password (8+ chars)" };
-        var confirmInput = Input("", 340) { UseSystemPasswordChar = true, PlaceholderText = "Confirm new password" };
+        var currentInput = Input("", 340);
+        currentInput.UseSystemPasswordChar = true;
+        currentInput.PlaceholderText = "Current password";
+        var newInput = Input("", 340);
+        newInput.UseSystemPasswordChar = true;
+        newInput.PlaceholderText = "New password (8+ chars)";
+        var confirmInput = Input("", 340);
+        confirmInput.UseSystemPasswordChar = true;
+        confirmInput.PlaceholderText = "Confirm new password";
 
         var saveBtn = new GButton("Change Password", true) { Width = 160 };
         var cancelBtn = new GButton("Cancel") { Width = 120 };
@@ -401,7 +418,7 @@ public static class ProfilePage
     static Label L(string text, float size = 9.5f, Color? color = null, bool bold = false, Color? bg = null) =>
         new() { Text = text, AutoSize = true, Font = Theme.F(size, bold), ForeColor = color ?? Theme.Silver, BackColor = bg ?? Theme.Bg, UseMnemonic = false };
 
-    static Control Input(string text, int w = 340, string placeholder = "") => new TextBox
+    static TextBox Input(string text, int w = 340, string placeholder = "") => new TextBox
     {
         Text = text, Width = w, BackColor = Theme.Surf2, ForeColor = Theme.Txt, BorderStyle = BorderStyle.FixedSingle,
         Font = Theme.F(10f), Margin = new Padding(0, 6, 8, 0), PlaceholderText = placeholder

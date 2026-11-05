@@ -53,6 +53,92 @@ public static class Cleaner
         return res.ToArray();
     }
 
+    static string[] WindowsUpdateCache()
+    {
+        var res = new List<string>();
+        var win = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
+        try
+        {
+            var dist = Path.Combine(win, @"SoftwareDistribution\Download");
+            if (Directory.Exists(dist)) res.Add(dist);
+            var dataStore = Path.Combine(win, @"SoftwareDistribution\DataStore");
+            if (Directory.Exists(dataStore)) res.Add(dataStore);
+        }
+        catch { }
+        return res.ToArray();
+    }
+
+    static string[] DeliveryOptimizationCache()
+    {
+        var res = new List<string>();
+        var win = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
+        try
+        {
+            var doCache = Path.Combine(win, @"ServiceProfiles\NetworkService\AppData\Local\Microsoft\Windows\DeliveryOptimization");
+            if (Directory.Exists(doCache)) res.Add(doCache);
+        }
+        catch { }
+        return res.ToArray();
+    }
+
+    static string[] PrefetchFiles()
+    {
+        var res = new List<string>();
+        var win = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
+        try
+        {
+            var prefetch = Path.Combine(win, "Prefetch");
+            if (Directory.Exists(prefetch)) res.Add(prefetch);
+        }
+        catch { }
+        return res.ToArray();
+    }
+
+    static string[] WindowsDefenderCache()
+    {
+        var res = new List<string>();
+        var win = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
+        try
+        {
+            var defender = Path.Combine(win, @"Temp\MpCmdRun.log");
+            var defenderCache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Microsoft\Windows Defender\Scans\History\CacheManager");
+            if (File.Exists(defender)) res.Add(defender);
+            if (Directory.Exists(defenderCache)) res.Add(defenderCache);
+        }
+        catch { }
+        return res.ToArray();
+    }
+
+    static string[] TemporaryInternetFiles()
+    {
+        var res = new List<string>();
+        try
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var ieCache = Path.Combine(local, @"Microsoft\Windows\INetCache");
+            if (Directory.Exists(ieCache)) res.Add(ieCache);
+            var edgeCache = Path.Combine(local, @"Microsoft\Edge\User Data\Default\Cache");
+            if (Directory.Exists(edgeCache)) res.Add(edgeCache);
+        }
+        catch { }
+        return res.ToArray();
+    }
+
+    static string[] DumpFiles()
+    {
+        var res = new List<string>();
+        var win = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
+        try
+        {
+            var liveKernel = Path.Combine(win, @"LiveKernelReports");
+            if (Directory.Exists(liveKernel)) res.Add(liveKernel);
+            var memory = Path.Combine(win, "MEMORY.DMP");
+            if (File.Exists(memory)) res.Add(memory);
+        }
+        catch { }
+        return res.ToArray();
+    }
+
     public static List<Category> DeepCategories()
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -63,6 +149,12 @@ public static class Cleaner
             new("Thumbnail & icon cache", new[] { Path.Combine(local, @"Microsoft\Windows\Explorer") }, false),
             new("Crash dumps", new[] { Path.Combine(local, "CrashDumps"), Path.Combine(win, "Minidump") }, false),
             new("Windows Error Reporting", new[] { Path.Combine(local, @"Microsoft\Windows\WER") }, false),
+            new("Windows Update cache", WindowsUpdateCache(), false),
+            new("Delivery Optimization cache", DeliveryOptimizationCache(), false),
+            new("Prefetch files", PrefetchFiles(), false),
+            new("Windows Defender cache", WindowsDefenderCache(), false),
+            new("Temporary Internet Files", TemporaryInternetFiles(), false),
+            new("Memory dumps & kernel reports", DumpFiles(), false),
         };
         void Browser(string name, string[] paths) { if (paths.Length > 0) l.Add(new(name, paths, false)); }
         Browser("Chrome cache", ChromiumCache(Path.Combine(local, @"Google\Chrome\User Data")));

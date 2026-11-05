@@ -113,7 +113,7 @@ public sealed partial class MainForm : Form
         stop.Click += (_, _) => { _scanStopped = true; try { _scanProc?.Kill(true); } catch { } };
         open.Click += (_, _) => { try { Process.Start(new ProcessStartInfo("windowsdefender:") { UseShellExecute = true }); } catch { } };
 
-        var page = Stack((Header("Security", "Powered by Windows Defender. DREX has no antivirus engine of its own."), false),
+        var page = Stack((MainForm.Header("Security", "Powered by Windows Defender. DREX has no antivirus engine of its own."), false),
             (Bar(run, quick, custom, full, upd, cfa, stop, open), false), (mid, true), (status, false));
         page.HandleCreated += async (_, _) => { if (!_busy) await RunChecks(); };
         return page;
@@ -146,7 +146,7 @@ public sealed partial class MainForm : Form
         }
         refresh.Click += async (_, _) => await Load();
         open.Click += (_, _) => { try { Process.Start(new ProcessStartInfo("windowsdefender:") { UseShellExecute = true }); } catch { } };
-        var page = Stack((Header("Threats", "Detection history from Windows Defender."), false), (Bar(refresh, open), false), (list, true), (status, false));
+        var page = Stack((MainForm.Header("Threats", "Detection history from Windows Defender."), false), (Bar(refresh, open), false), (list, true), (status, false));
         page.HandleCreated += async (_, _) => await Load();
         return page;
     }
@@ -189,7 +189,7 @@ public sealed partial class MainForm : Form
         en.Click += (_, _) => Apply(true);
         open.Click += (_, _) => StartupScanner.OpenSettings();
         Load();
-        return Stack((Header("Startup", "See what launches with Windows. Nothing is ever disabled automatically."), false),
+        return Stack((MainForm.Header("Startup", "See what launches with Windows. Nothing is ever disabled automatically."), false),
             (Bar(refresh, dis, en, open), false), (list, true), (status, false));
     }
 
@@ -226,7 +226,7 @@ public sealed partial class MainForm : Form
         };
         cancel.Click += (_, _) => _cts?.Cancel();
         show.Click += (_, _) => { if (list.SelectedItems.Count > 0) OpenInExplorer(list.SelectedItems[0].SubItems[2].Text); };
-        return Stack((Header("Large Files", "Find what is using your space. DREX only shows files — you decide what to do."), false),
+        return Stack((MainForm.Header("Large Files", "Find what is using your space. DREX only shows files — you decide what to do."), false),
             (Bar(path, browse, Cap("Min size (MB)"), mb, scan, cancel, show), false), (list, true), (status, false));
     }
 
@@ -299,7 +299,7 @@ public sealed partial class MainForm : Form
             status.Text = $"Moved {okSet.Count} of {chosen.Count} file(s) to the Recycle Bin." + (okSet.Count < chosen.Count ? " Some could not be moved (in use or no permission)." : "");
             End(); scan.Enabled = true; del.Enabled = list.Items.Count > 0;
         };
-        return Stack((Header("Duplicate Finder", "Finds identical files by content, so only true copies are listed."), false),
+        return Stack((MainForm.Header("Duplicate Finder", "Finds identical files by content, so only true copies are listed."), false),
             (Bar(path, browse, Cap("Min size (MB)"), mb, scan, cancel), false), (Bar(pick, del, show), false), (list, true), (status, false));
     }
 
@@ -352,7 +352,7 @@ public sealed partial class MainForm : Form
             var p = list.SelectedItems[0].SubItems[3].Text;
             if (Directory.Exists(p) && !p.Equals(path.Text, StringComparison.OrdinalIgnoreCase)) { path.Text = p; await Analyze(); }
         };
-        return Stack((Header("Disk Usage", "See which folders are taking the space."), false), (Bar(path, browse, go, cancel, open), false), (list, true), (status, false));
+        return Stack((MainForm.Header("Disk Usage", "See which folders are taking the space."), false), (Bar(path, browse, go, cancel, open), false), (list, true), (status, false));
     }
 
     // ---------- Web Blocker ----------
@@ -402,7 +402,7 @@ public sealed partial class MainForm : Form
         ads.Click += (_, _) => Preset("ad/tracker", new[] { "doubleclick.net", "googleadservices.com", "googlesyndication.com", "adservice.google.com", "adnxs.com", "taboola.com", "outbrain.com", "criteo.com", "scorecardresearch.com", "quantserve.com", "hotjar.com" });
         adm.Click += (_, _) => RestartAsAdmin();
         Load();
-        return Stack((Header("Web Blocker", "Blocks sites system-wide using the Windows hosts file (parental-control style)."), false),
+        return Stack((MainForm.Header("Web Blocker", "Blocks sites system-wide using the Windows hosts file (parental-control style)."), false),
             (Bar(input, add, rem, adm), false), (Bar(Cap("Presets"), social, ads), false), (list, true), (status, false));
     }
 
@@ -462,7 +462,7 @@ public sealed partial class MainForm : Form
             catch (Exception ex) { big.Text = "Restore failed"; detail.Text = ex.Message; }
             End(); restore.Enabled = true; start.Enabled = true; cancel.Enabled = false;
         };
-        return Stack((Header("Backup", "Compress an important folder into a ZIP, and restore it later."), false),
+        return Stack((MainForm.Header("Backup", "Compress an important folder into a ZIP, and restore it later."), false),
             (Bar(Cap("Folder"), src, bsrc), false), (Bar(Cap("Save to"), dst, bdst), false), (Bar(start, cancel), false),
             (Bar(Cap("Restore"), rzip, brz), false), (Bar(Cap("Into"), rdst, brd, restore), false), (holder, false), (detail, false));
     }

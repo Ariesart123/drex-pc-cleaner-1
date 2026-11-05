@@ -7,6 +7,7 @@ public class Card : Panel
     public bool Accent;
     // Hierarchical radii: 16 (page), 12 (section), 8 (inline/nested)
     public int Radius = 12;
+    float _opacity = 1f;
     public Card() : this(12) { }
     public Card(int radius)
     {
@@ -21,17 +22,28 @@ public class Card : Panel
         g.Clear(Parent?.BackColor ?? Theme.Bg);
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using var path = Theme.Round(new Rectangle(0, 0, Width - 1, Height - 1), Radius);
-        using var br = new SolidBrush(Theme.Surf);
+        using var br = new SolidBrush(Color.FromArgb((int)(255 * _opacity), Theme.Surf));
         g.FillPath(br, path);
-        using var pen = new Pen(Accent ? Color.FromArgb(110, Theme.Accent) : Theme.Surf2, 1f);
+        using var pen = new Pen(Accent ? Color.FromArgb((int)(110 * _opacity), Theme.Accent) : Color.FromArgb((int)(255 * _opacity), Theme.Surf2), 1f);
         g.DrawPath(pen, path);
+    }
+
+    /// <summary>
+    /// Fades in the card over the specified duration.
+    /// </summary>
+    public void FadeIn(int durationMs = 300)
+    {
+        _opacity = 0f;
+        Anim.Float(this, 0f, 1f, durationMs, v => { _opacity = v; Invalidate(); });
     }
 }
 
-public class GButton : Control
+public class GButton : Control, IButtonControl
 {
     public bool Primary;
-    bool _hover, _down;
+    float _hoverProgress = 0f;
+    float _pressProgress = 0f;
+    public DialogResult DialogResult { get; set; }
     public GButton(string text, bool primary = false)
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
@@ -39,11 +51,14 @@ public class GButton : Control
         Size = new Size(Math.Max(104, TextRenderer.MeasureText(text, Font).Width + 44), 44);
         Margin = new Padding(0, 0, 6, 0);
     }
+
+    public void NotifyDefault(bool value) { }
+    public void PerformClick() { OnClick(EventArgs.Empty); }
     protected override void OnPaintBackground(PaintEventArgs e) { }
-    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { _hover = false; _down = false; Invalidate(); base.OnMouseLeave(e); }
-    protected override void OnMouseDown(MouseEventArgs e) { _down = true; Invalidate(); base.OnMouseDown(e); }
-    protected override void OnMouseUp(MouseEventArgs e) { _down = false; Invalidate(); base.OnMouseUp(e); }
+    protected override void OnMouseEnter(EventArgs e) { Anim.Float(this, _hoverProgress, 1f, 150, v => { _hoverProgress = v; Invalidate(); }); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { Anim.Float(this, _hoverProgress, 0f, 150, v => { _hoverProgress = v; Invalidate(); }); Anim.Float(this, _pressProgress, 0f, 100, v => { _pressProgress = v; Invalidate(); }); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { Anim.Float(this, _pressProgress, 1f, 50, v => { _pressProgress = v; Invalidate(); }); base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { Anim.Float(this, _pressProgress, 0f, 100, v => { _pressProgress = v; Invalidate(); }); base.OnMouseUp(e); }
     protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
     protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
     protected override void OnPaint(PaintEventArgs e)
@@ -57,19 +72,22 @@ public class GButton : Control
         if (Primary && Enabled)
         {
             // Single subtle glow on hover, no multi-layer glow
-            if (_hover)
+            if (_hoverProgress > 0f)
             {
                 using var glowPath = Theme.Round(Rectangle.Inflate(r, 2, 2), 12);
-                using var glowPen = new Pen(Color.FromArgb(30, Theme.Accent), 1.5f);
+                using var glowPen = new Pen(Color.FromArgb((int)(30 * _hoverProgress), Theme.Accent), 1.5f);
                 g.DrawPath(glowPen, glowPath);
             }
-            using var lg = new LinearGradientBrush(r, _hover ? Theme.AccentHi : Theme.Accent, Theme.AccentLo, 90f);
+            var startCol = _hoverProgress > 0.5f ? Theme.AccentHi : Theme.Accent;
+            using var lg = new LinearGradientBrush(r, startCol, Theme.AccentLo, 90f);
             g.FillPath(lg, path);
             fore = Color.White;
         }
         else
         {
-            var fill = !Enabled ? Theme.Surf : _down ? Color.FromArgb(0x1A, 0x2A, 0x3A) : _hover ? Color.FromArgb(0x16, 0x22, 0x30) : Theme.Surf2;
+            var fill = !Enabled ? Theme.Surf :
+                _pressProgress > 0.5f ? Color.FromArgb(0x1A, 0x2A, 0x3A) :
+                _hoverProgress > 0.5f ? Color.FromArgb(0x16, 0x22, 0x30) : Theme.Surf2;
             using var br = new SolidBrush(fill);
             g.FillPath(br, path);
             using var bp = new Pen(Color.FromArgb(0x2D, 0x34, 0x46));
@@ -83,17 +101,24 @@ public class GButton : Control
 public class Toggle : Control
 {
     bool _on;
+    float _thumbPos;
     public event EventHandler? CheckedChanged;
     [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public bool Checked
     {
         get => _on;
-        set { if (_on == value) return; _on = value; Invalidate(); CheckedChanged?.Invoke(this, EventArgs.Empty); }
+        set { if (_on == value) return; _on = value; AnimateThumb(); Invalidate(); CheckedChanged?.Invoke(this, EventArgs.Empty); }
     }
     public Toggle()
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         Size = new Size(48, 28); Cursor = Cursors.Hand;
+        _thumbPos = 0f;
+    }
+    void AnimateThumb()
+    {
+        var target = _on ? 1f : 0f;
+        Anim.Float(this, _thumbPos, target, 200, v => { _thumbPos = v; Invalidate(); });
     }
     protected override void OnPaintBackground(PaintEventArgs e) { }
     protected override void OnClick(EventArgs e) { Checked = !Checked; base.OnClick(e); }
@@ -104,11 +129,15 @@ public class Toggle : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var r = new Rectangle(1, 1, Width - 3, Height - 3);
         using var path = Theme.Round(r, r.Height / 2);
-        using var br = new SolidBrush(_on ? Theme.Accent : Color.FromArgb(0x1E, 0x26, 0x34));
+        // Interpolate track color
+        var trackColor = Theme.Interpolate(Color.FromArgb(0x1E, 0x26, 0x34), Theme.Accent, _thumbPos);
+        using var br = new SolidBrush(trackColor);
         g.FillPath(br, path);
         int d = r.Height - 8;
-        int x = _on ? r.Right - d - 4 : r.X + 4;
-        using var kb = new SolidBrush(_on ? Color.White : Theme.Silver);
+        int startX = r.X + 4;
+        int endX = r.Right - d - 4;
+        int x = startX + (int)((endX - startX) * _thumbPos);
+        using var kb = new SolidBrush(_thumbPos > 0.5f ? Color.White : Theme.Silver);
         g.FillEllipse(kb, x, r.Y + 4, d, d);
     }
 }
@@ -146,9 +175,9 @@ public class DarkBar : Control
 
 public class Ring : Control
 {
-    float _v; string _big = "", _small = "";
+    float _v, _animV; string _big = "", _small = "";
     [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public float Value { get => _v; set { if (Math.Abs(_v - value) > 0.01f) { _v = value; Invalidate(); } } }
+    public float Value { get => _v; set { if (Math.Abs(_v - value) > 0.01f) { _v = value; AnimateValue(); } } }
     [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
     public string Big { get => _big; set { if (_big != value) { _big = value; Invalidate(); } } }
     [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -157,6 +186,10 @@ public class Ring : Control
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         Size = new Size(120, 120);
+    }
+    void AnimateValue()
+    {
+        Anim.Float(this, _animV, _v, 800, v => { _animV = v; Invalidate(); });
     }
     protected override void OnPaintBackground(PaintEventArgs e) { }
     protected override void OnPaint(PaintEventArgs e)
@@ -169,11 +202,11 @@ public class Ring : Control
         // Track: subtle, darker than surface
         using (var track = new Pen(Color.FromArgb(0x1A, 0x22, 0x30), 10f)) g.DrawEllipse(track, r);
 
-        float sweep = 360f * Math.Clamp(_v, 0f, 100f) / 100f;
+        float sweep = 360f * Math.Clamp(_animV, 0f, 100f) / 100f;
         if (sweep > 1f)
         {
             // Accent color based on value - teal for normal, semantic for warnings
-            Color col = _v >= 90 ? Theme.Bad : _v >= 75 ? Theme.Warn : Theme.Accent;
+            Color col = _animV >= 90 ? Theme.Bad : _animV >= 75 ? Theme.Warn : Theme.Accent;
             using var pen = new Pen(col, 10f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
             g.DrawArc(pen, r, -90f, sweep);
         }
@@ -184,9 +217,11 @@ public class Ring : Control
 
 public class NavItem : Control
 {
-    bool _sel, _hover;
+    bool _sel;
+    float _selProgress = 0f;
+    float _hoverProgress = 0f;
     [System.ComponentModel.Browsable(false), System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
-    public bool Selected { get => _sel; set { if (_sel != value) { _sel = value; Invalidate(); } } }
+    public bool Selected { get => _sel; set { if (_sel != value) { _sel = value; Anim.Float(this, _selProgress, value ? 1f : 0f, 250, v => { _selProgress = v; Invalidate(); }); } } }
     public NavItem(string text)
     {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
@@ -199,8 +234,8 @@ public class NavItem : Control
         Width = 212;
     }
     protected override void OnPaintBackground(PaintEventArgs e) { }
-    protected override void OnMouseEnter(EventArgs e) { _hover = true; Invalidate(); base.OnMouseEnter(e); }
-    protected override void OnMouseLeave(EventArgs e) { _hover = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseEnter(EventArgs e) { Anim.Float(this, _hoverProgress, 1f, 150, v => { _hoverProgress = v; Invalidate(); }); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { Anim.Float(this, _hoverProgress, 0f, 150, v => { _hoverProgress = v; Invalidate(); }); base.OnMouseLeave(e); }
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
@@ -208,24 +243,27 @@ public class NavItem : Control
         g.SmoothingMode = SmoothingMode.AntiAlias;
         var r = new Rectangle(0, 0, Width, Height);
 
-        if (_sel)
+        // Selected state with animation
+        if (_selProgress > 0f)
         {
-            // Selected: left accent bar + subtle background tint
-            using var bar = new SolidBrush(Theme.Accent);
+            var selAlpha = (int)(0x0D * _selProgress);
+            using var bar = new SolidBrush(Color.FromArgb((int)(255 * _selProgress), Theme.Accent));
             g.FillRectangle(bar, 0, 0, 3, Height);
-            using var bg = new SolidBrush(Color.FromArgb(0x0D, 0x3B, 0x2E)); // teal tint at ~10%
+            using var bg = new SolidBrush(Color.FromArgb(selAlpha, 0x3B, 0x2E));
             g.FillRectangle(bg, r);
         }
-        else if (_hover)
+        // Hover state with animation (only when not selected)
+        else if (_hoverProgress > 0f)
         {
-            // Hover: subtle background only
-            using var bg = new SolidBrush(Color.FromArgb(0x16, 0x22, 0x30));
+            var hoverAlpha = (int)(0x16 * _hoverProgress);
+            using var bg = new SolidBrush(Color.FromArgb(hoverAlpha, 0x22, 0x30));
             g.FillRectangle(bg, r);
         }
 
         // Text: left-aligned with generous padding, no glyph column
         var textRect = new Rectangle(16, 0, Width - 20, Height);
-        Color textColor = _sel ? Theme.Txt : Theme.Silver;
+        // Interpolate text color
+        var textColor = _selProgress > 0f ? Theme.Interpolate(Theme.Silver, Theme.Txt, _selProgress) : Theme.Silver;
         TextRenderer.DrawText(g, Text, Font, textRect, textColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
     }
 }

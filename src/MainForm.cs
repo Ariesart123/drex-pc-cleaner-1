@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32;
 using System.Net;
+using System.Linq;
 namespace Drex;
 
 public sealed partial class MainForm : Form
@@ -28,15 +29,17 @@ public sealed partial class MainForm : Form
     {
         "Dashboard", "Security", "Threats", "Scanner", "Deep Clean", "Startup",
         "Large Files", "Duplicates", "Disk Usage", "Web Blocker",
-        "File Vault", "Backup", "Scheduler", "Event Log", "History", "Settings", "Profile"
+        "File Vault", "Backup", "Scheduler", "Event Log", "History", "Settings"
     };
+    // Profile is added dynamically when logged in
 
     readonly bool _startHidden;
 
     public MainForm(bool startHidden = false)
     {
         _startHidden = startHidden;
-        if (startHidden) { Opacity = 0; ShowInTaskbar = false; }
+        // Determine if we need to start hidden (tray mode)
+        if (startHidden) { Opacity = 0; ShowInTaskbar = false; Visible = false; }
         Text = "DREX PC CLEANER"; BackColor = Theme.Bg; ForeColor = Theme.Txt; Font = Theme.F(9.5f);
         ClientSize = new Size(1120, 720); MinimumSize = new Size(1000, 680); StartPosition = FormStartPosition.CenterScreen;
         Icon = AppIcon.Get(48);
@@ -58,61 +61,91 @@ public sealed partial class MainForm : Form
         Controls.Add(_content); Controls.Add(side);
 
         _ramTimer.Tick += (_, _) => UpdateSystem();
-        Shown += async (_, _) =>
+        Load += async (_, _) =>
         {
-            // Check for remember me token for auto-login
+            // Check for remember me token for auto-login (email/password accounts)
             var rememberedProfile = AuthService.CheckRememberMeToken();
             if (rememberedProfile != null)
-            {
-                // Valid remember me token - auto login
-                UserProfileStore.CurrentProfile = rememberedProfile;
-                UserProfileStore.Save(rememberedProfile);
-                Go("Dashboard"); StartRamTimer();
-                if (_startHidden) { Hide(); Opacity = 1; ShowInTaskbar = true; }
-                await RunLaunchFlow();
-                await TrayVerify();
-                return;
-            }
-
-            if (!UserProfileStore.IsLoggedIn && !_s.FirstLaunchCompleted)
-            {
-                // First launch - show login form
-                Hide();
-                var loginForm = new LoginForm();
-                if (loginForm.ShowDialog(this) == DialogResult.OK && loginForm.AuthenticatedProfile != null)
                 {
-                    UserProfileStore.CurrentProfile = loginForm.AuthenticatedProfile;
-                    UserProfileStore.Save(loginForm.AuthenticatedProfile);
-                    _s.FirstLaunchCompleted = true;
-                    _s.Save();
-                    Show();
+                    // Valid remember me token - auto login
+                    UserProfileStore.CurrentProfile = rememberedProfile;
+                    UserProfileStore.Save(rememberedProfile);
                     Go("Dashboard"); StartRamTimer();
+                    if (_startHidden) { Hide(); Opacity = 1; ShowInTaskbar = true; }
+                    await RunLaunchFlow();
+                    await TrayVerify();
+                    return;
+                }
+
+                // Try silent Google authentication for returning Google users
+                var silentAuthResult = await AuthService.TrySilentGoogleAuthAsync();
+                if (silentAuthResult == "AUTH_SUCCESS")
+                {
+                    var profile = UserProfileStore.Load();
+                    if (profile != null && profile.Provider == "google")
+                    {
+                        UserProfileStore.CurrentProfile = profile;
+                        UserProfileStore.Save(profile);
+                        Go("Dashboard"); StartRamTimer();
+                        if (_startHidden) { Hide(); Opacity = 1; ShowInTaskbar = true; }
+                        await RunLaunchFlow();
+                        await TrayVerify();
+                        return;
+                    }
+                }
+
+                if (!UserProfileStore.IsLoggedIn && !_s.FirstLaunchCompleted)
+                {
+                    // First launch - show login form
+                    var loginForm = new LoginForm();
+                    if (loginForm.ShowDialog(this) == DialogResult.OK && loginForm.AuthenticatedProfile != null)
+                    {
+                        UserProfileStore.CurrentProfile = loginForm.AuthenticatedProfile;
+                        UserProfileStore.Save(loginForm.AuthenticatedProfile);
+                        _s.FirstLaunchCompleted = true;
+                        _s.Save();
+                        Show();
+                        Go("Dashboard"); StartRamTimer();
+                        await RunLaunchFlow();
+                        await TrayVerify();
+                    }
+                    else
+                    {
+                        // User cancelled login - exit
+                        Application.Exit();
+                    }
+                }
+                else if (UserProfileStore.IsLoggedIn)
+                {
+                    // User already logged in
+                    Go("Dashboard"); StartRamTimer();
+                    if (_startHidden) { Hide(); Opacity = 1; ShowInTaskbar = true; }
                     await RunLaunchFlow();
                     await TrayVerify();
                 }
                 else
                 {
-                    // User cancelled login - exit
-                    Application.Exit();
+                    // First launch completed but not logged in - show login form
+                    var loginForm = new LoginForm();
+                    if (loginForm.ShowDialog(this) == DialogResult.OK && loginForm.AuthenticatedProfile != null)
+                    {
+                        UserProfileStore.CurrentProfile = loginForm.AuthenticatedProfile;
+                        UserProfileStore.Save(loginForm.AuthenticatedProfile);
+                        _s.FirstLaunchCompleted = true;
+                        _s.Save();
+                        Show();
+                        Opacity = 1; ShowInTaskbar = true;
+                        Go("Dashboard"); StartRamTimer();
+                        await RunLaunchFlow();
+                        await TrayVerify();
+                    }
+                    else
+                    {
+                        // User cancelled login - exit
+                        Application.Exit();
+                    }
                 }
-            }
-            else if (UserProfileStore.IsLoggedIn)
-            {
-                // User already logged in
-                Go("Dashboard"); StartRamTimer();
-                if (_startHidden) { Hide(); Opacity = 1; ShowInTaskbar = true; }
-                await RunLaunchFlow();
-                await TrayVerify();
-            }
-            else
-            {
-                // First launch completed but not logged in (shouldn't happen)
-                Go("Dashboard"); StartRamTimer();
-                if (_startHidden) { Hide(); Opacity = 1; ShowInTaskbar = true; }
-                await RunLaunchFlow();
-                await TrayVerify();
-            }
-        };
+            };
         FormClosing += (_, e) =>
         {
             if (!_exiting && _tray != null && e.CloseReason == CloseReason.UserClosing)
@@ -145,7 +178,7 @@ public sealed partial class MainForm : Form
     static Label L(string text, float size = 9.5f, Color? color = null, bool bold = false, Color? bg = null) =>
         new() { Text = text, AutoSize = true, Font = Theme.F(size, bold), ForeColor = color ?? Theme.Silver, BackColor = bg ?? Theme.Bg, UseMnemonic = false };
 
-    static Control Header(string title, string sub)
+    public static Control Header(string title, string sub)
     {
         var p = new Panel { Height = 66, BackColor = Theme.Bg };
         var t = L(title, 21, Theme.Txt, true); t.Location = new Point(0, 0);
@@ -210,6 +243,13 @@ public sealed partial class MainForm : Form
     // ---------- navigation ----------
     void Go(string name)
     {
+        // Check if Profile is clicked but not logged in
+        if (name == "Profile" && !UserProfileStore.IsLoggedIn)
+        {
+            ShowLoginForm();
+            return;
+        }
+
         foreach (var kv in _nav) kv.Value.Selected = kv.Key == name;
         if (!_pages.TryGetValue(name, out var page))
         {
@@ -224,6 +264,86 @@ public sealed partial class MainForm : Form
         page.BringToFront();
         if (name == "History" && _historyBox != null) { _historyBox.Text = History.ReadAll(); _historyBox.SelectionStart = _historyBox.TextLength; _historyBox.ScrollToCaret(); }
         if (name == "Profile" && UserProfileStore.IsLoggedIn) { _pages["Profile"] = ProfilePage.Build(UserProfileStore.CurrentProfile!, this); _content.Controls.Add(_pages["Profile"]); _pages["Profile"].BringToFront(); }
+    }
+
+    async void ShowLoginForm()
+    {
+        _pages.Clear();
+        var loginForm = new LoginForm();
+        if (loginForm.ShowDialog(this) == DialogResult.OK && loginForm.AuthenticatedProfile != null)
+        {
+            UserProfileStore.CurrentProfile = loginForm.AuthenticatedProfile;
+            UserProfileStore.Save(loginForm.AuthenticatedProfile);
+            _s.FirstLaunchCompleted = true;
+            _s.Save();
+            Show();
+            AddProfileNavItem();
+            Go("Dashboard");
+            StartRamTimer();
+            await RunLaunchFlow();
+            await TrayVerify();
+        }
+        else
+        {
+            // User cancelled login - go back to Dashboard (or exit if first launch)
+            if (!_s.FirstLaunchCompleted)
+            {
+                Application.Exit();
+            }
+            else
+            {
+                Show();
+                Go("Dashboard");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Handles logout by clearing the session and showing the login form again.
+    /// </summary>
+    public void HandleLogout()
+    {
+        Debug.WriteLine("[MainForm] Handling logout...");
+
+        // Clear the current profile
+        UserProfileStore.SignOut();
+
+        // Remove Profile from nav if present
+        if (_nav.TryGetValue("Profile", out var profileNav))
+        {
+            _nav.Remove("Profile");
+            // Note: The navHost is a FlowLayoutPanel, so we need to find and remove the control
+            var side = Controls.OfType<Panel>().FirstOrDefault(p => p.Width == 212);
+            var navHost = side?.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+            if (navHost != null)
+            {
+                navHost.Controls.Remove(profileNav);
+            }
+        }
+
+        // Show login form
+        ShowLoginForm();
+    }
+
+    void AddProfileNavItem()
+    {
+        if (_nav.ContainsKey("Profile")) return;
+
+        var n = new NavItem("Profile");
+        n.Click += (_, _) => Go("Profile");
+        _nav["Profile"] = n;
+
+        var side = Controls.OfType<Panel>().FirstOrDefault(p => p.Width == 212);
+        var navHost = side?.Controls.OfType<FlowLayoutPanel>().FirstOrDefault();
+        if (navHost != null)
+        {
+            // Insert before Settings (which is the last item)
+            var settingsIndex = navHost.Controls.IndexOf(_nav["Settings"]);
+            if (settingsIndex >= 0)
+                navHost.Controls.SetChildIndex(n, settingsIndex);
+            else
+                navHost.Controls.Add(n);
+        }
     }
 
     // ---------- Dashboard ----------
@@ -256,13 +376,23 @@ public sealed partial class MainForm : Form
         cards.Controls.Add(c1); cards.Controls.Add(c2); cards.Controls.Add(c3);
 
         _btnScan = new GButton("Scan TEMP"); _btnClean = new GButton("Clean safe files", true); _btnCancel = new GButton("Cancel") { Enabled = false };
+        var btnOptimize = new GButton("Optimize System", true) { Width = 160 };
         _btnScan.Click += async (_, _) => await ScanSafe();
         _btnClean.Click += async (_, _) => await CleanSafe();
         _btnCancel.Click += (_, _) => _cts?.Cancel();
+        btnOptimize.Click += async (_, _) => await OptimizeSystem();
+
+        // Add tooltip for better UX
+        var toolTip = new ToolTip { BackColor = Theme.Surf, ForeColor = Theme.Txt };
+        toolTip.SetToolTip(_btnScan, "Scan safe TEMP locations for files older than your minimum age setting");
+        toolTip.SetToolTip(_btnClean, "Clean all scanned safe files");
+        toolTip.SetToolTip(_btnCancel, "Cancel the current operation");
+        toolTip.SetToolTip(btnOptimize, "One-click: scan, clean temp, run security check, and check for updates");
+
         _lvCats = new DarkList(("Location", 170), ("Files", 80), ("Size", 110), ("Path", 500));
         _lblStatus = StatusLabel("Starting…");
         return Stack((Header("Dashboard", "Safe cleanup, system health and security at a glance."), false), (cards, false),
-            (Bar(_btnScan, _btnClean, _btnCancel), false), (_lvCats, true), (_lblStatus, false));
+            (Bar(_btnScan, _btnClean, btnOptimize, _btnCancel), false), (_lvCats, true), (_lblStatus, false));
     }
 
     void SetDashBusy(bool b) { _btnScan.Enabled = !b; _btnClean.Enabled = !b; _btnCancel.Enabled = b; }
@@ -315,6 +445,86 @@ public sealed partial class MainForm : Form
         History.Add(msg);
         End(); SetDashBusy(false);
         await ScanSafe(msg);
+    }
+
+    async Task OptimizeSystem()
+    {
+        if (!Begin(out var ct)) return;
+        SetDashBusy(true);
+        _btnClean.Enabled = false;
+        _lblStatus.Text = "Running system optimization…";
+
+        try
+        {
+            var messages = new List<string>();
+
+            // 1. Scan and clean temp
+            var cats = Cleaner.SafeCategories();
+            var total = new CleanResult(); var age = MinAge;
+            foreach (var c in cats)
+            {
+                var r = await Task.Run(() => Cleaner.Clean(c, age, ct), ct);
+                total.Bytes += r.Bytes; total.Deleted += r.Deleted; total.Skipped += r.Skipped; total.Errors += r.Errors;
+            }
+            messages.Add($"Cleaned {Fmt.Size(total.Bytes)} ({total.Deleted:N0} files)");
+
+            // 2. Run security check
+            _lblStatus.Text = "Checking Windows protections…";
+            var rep = await Task.Run(() => Security.CheckAll());
+            int issues = rep.Checks.Count(c => c.Status == "Risk" || c.Status == "Warning");
+            messages.Add($"Security score: {rep.Score}/100 ({issues} issues)");
+
+            // 3. Check Windows Update
+            _lblStatus.Text = "Checking for Windows updates…";
+            var updateCheck = await Task.Run(() =>
+            {
+                var r = Security.RunPs("try{ $s=(New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search(\"IsInstalled=0\"); $s.Updates.Count }catch{ -1 }");
+                return r.Out;
+            });
+            if (int.TryParse(updateCheck.Trim(), out int pendingUpdates) && pendingUpdates >= 0)
+            {
+                messages.Add($"Windows Updates: {pendingUpdates} pending");
+            }
+
+            // 4. Empty Recycle Bin
+            _lblStatus.Text = "Emptying Recycle Bin…";
+            var binSize = RecycleBin.Size();
+            if (binSize > 0 && RecycleBin.Empty())
+            {
+                messages.Add($"Recycle Bin: freed {Fmt.Size(binSize)}");
+            }
+
+            // 5. Clear thumbnails cache
+            _lblStatus.Text = "Clearing thumbnail cache…";
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var thumbPath = Path.Combine(local, @"Microsoft\Windows\Explorer");
+            if (Directory.Exists(thumbPath))
+            {
+                var thumbCat = new Category("Thumbnails", new[] { thumbPath }, false);
+                var thumbResult = await Task.Run(() => Cleaner.Clean(thumbCat, TimeSpan.FromHours(1), ct), ct);
+                if (thumbResult.Bytes > 0)
+                    messages.Add($"Thumbnails: freed {Fmt.Size(thumbResult.Bytes)}");
+            }
+
+            _lblStatus.Text = "Optimization complete!";
+            var summary = "System Optimization Results:\n" + string.Join("\n", messages.Select(m => "✓ " + m));
+            MessageBox.Show(this, summary, "Optimization Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            History.Add("Optimize: " + string.Join("; ", messages));
+        }
+        catch (OperationCanceledException)
+        {
+            _lblStatus.Text = "Optimization cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _lblStatus.Text = "Optimization error: " + ex.Message;
+            MessageBox.Show(this, "Optimization failed: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            End(); SetDashBusy(false);
+            await ScanSafe();
+        }
     }
 
     // ---------- Deep Clean ----------

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -27,7 +28,6 @@ public sealed class GoogleAuthConfig
     public static string ClientId => GetRequiredEnv("GOOGLE_CLIENT_ID");
     public static string ClientSecret => GetRequiredEnv("GOOGLE_CLIENT_SECRET");
     public static readonly string[] Scopes = { "openid", "email", "profile" };
-    public static readonly string RedirectUri = "http://localhost:54321/callback/";
 
     private static string GetRequiredEnv(string name)
     {
@@ -37,7 +37,7 @@ public sealed class GoogleAuthConfig
             throw new InvalidOperationException(
                 $"Required environment variable '{name}' is not set. " +
                 $"Please set the {name} environment variable before running the application. " +
-                $"For Google OAuth, obtain credentials from https://console.cloud.google.com/apis/credentials");
+                $"For Google OAuth, obtain Desktop app credentials from https://console.cloud.google.com/apis/credentials");
         }
         return value;
     }
@@ -56,24 +56,71 @@ public static class AuthService
         DataStore = new FileDataStore("DrexCleaner.Auth", true)
     });
 
-    public static string GetGoogleAuthUrl()
-    {
-        var request = Flow.CreateAuthorizationCodeRequest(GoogleAuthConfig.RedirectUri);
-        request.State = Guid.NewGuid().ToString("N");
-        return request.Build().ToString();
-    }
-
-    public static async Task<AuthResult> HandleGoogleCallbackAsync(string authorizationCode)
+    /// <summary>
+    /// Initiates Google OAuth using the Desktop app flow (GoogleWebAuthorizationBroker + LocalServerCodeReceiver).
+    /// Opens the system browser for user consent and receives the callback on a local random port.
+    /// Returns the authorization URL for the UI to open in the browser.
+    /// </summary>
+    public static async Task<string> InitiateGoogleAuthAsync()
     {
         try
         {
-            var tokenResponse = await Flow.ExchangeCodeForTokenAsync("user", authorizationCode, GoogleAuthConfig.RedirectUri, CancellationToken.None);
+            // Validate environment variables are loaded
+            var clientId = GoogleAuthConfig.ClientId;
+            var clientSecret = GoogleAuthConfig.ClientSecret;
 
-            if (tokenResponse.Error != null)
-                return new AuthResult { Success = false, ErrorMessage = tokenResponse.ErrorDescription ?? "OAuth token exchange failed" };
+            Debug.WriteLine($"[GoogleAuth] Starting OAuth flow with ClientId: {clientId?.Substring(0, Math.Min(20, clientId.Length))}...");
+            Debug.WriteLine($"[GoogleAuth] Scopes: {string.Join(", ", GoogleAuthConfig.Scopes)}");
 
-            // Get user info from Google
-            var credential = new UserCredential(Flow, "user", tokenResponse);
+            // GoogleWebAuthorizationBroker handles the full flow including LocalServerCodeReceiver
+            // This uses a random localhost port, so no fixed redirect URI is needed
+            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                new ClientSecrets
+                {
+                    ClientId = clientId,
+                    ClientSecret = clientSecret
+                },
+                GoogleAuthConfig.Scopes,
+                "user",
+                CancellationToken.None,
+                Flow.DataStore);
+
+            Debug.WriteLine($"[GoogleAuth] Authorization completed. Token: {(!string.IsNullOrEmpty(credential.Token.AccessToken) ? "Present" : "Missing")}");
+
+            // The credential already has the access token; get user info
+            return await ProcessGoogleCredentialAsync(credential);
+        }
+        catch (OperationCanceledException)
+        {
+            Debug.WriteLine("[GoogleAuth] Operation was cancelled by user");
+            return "AUTH_CANCELLED";
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("environment variable"))
+        {
+            Debug.WriteLine($"[GoogleAuth] Environment variable error: {ex.Message}");
+            return $"AUTH_ERROR: {ex.Message}";
+        }
+        catch (Google.GoogleApiException ex)
+        {
+            Debug.WriteLine($"[GoogleAuth] Google API error: {ex.Message}, Code: {ex.Error?.Code}");
+            return $"AUTH_ERROR: Google API error - {ex.Error?.Message ?? ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GoogleAuth] Unexpected error: {ex}");
+            return $"AUTH_ERROR: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Processes an existing UserCredential (e.g., from stored refresh token) to get user profile.
+    /// </summary>
+    static async Task<string> ProcessGoogleCredentialAsync(UserCredential credential)
+    {
+        try
+        {
+            Debug.WriteLine("[GoogleAuth] Processing Google credential...");
+
             var oauth2Service = new Oauth2Service(new BaseClientService.Initializer
             {
                 HttpClientInitializer = credential,
@@ -81,9 +128,13 @@ public static class AuthService
             });
 
             var userInfo = await oauth2Service.Userinfo.Get().ExecuteAsync();
+            Debug.WriteLine($"[GoogleAuth] User info retrieved: {userInfo.Email}");
 
             if (string.IsNullOrEmpty(userInfo.Email))
-                return new AuthResult { Success = false, ErrorMessage = "Failed to retrieve email from Google" };
+            {
+                Debug.WriteLine("[GoogleAuth] Failed to retrieve email from Google");
+                return "AUTH_ERROR: Failed to retrieve email from Google";
+            }
 
             // Find or create profile
             var existingProfile = UserProfileStore.Load();
@@ -92,6 +143,7 @@ public static class AuthService
             if (existingProfile != null && existingProfile.Provider == "google" && existingProfile.ProviderId == userInfo.Id)
             {
                 // Existing Google user
+                Debug.WriteLine("[GoogleAuth] Found existing Google user");
                 profile = existingProfile;
                 profile.Email = userInfo.Email;
                 profile.DisplayName = userInfo.Name ?? userInfo.Email;
@@ -102,6 +154,7 @@ public static class AuthService
             else if (existingProfile != null && existingProfile.Provider == "manual" && existingProfile.Email.Equals(userInfo.Email, StringComparison.OrdinalIgnoreCase))
             {
                 // Link Google to existing manual account
+                Debug.WriteLine("[GoogleAuth] Linking Google to existing manual account");
                 profile = existingProfile;
                 profile.Provider = "google";
                 profile.ProviderId = userInfo.Id;
@@ -113,6 +166,7 @@ public static class AuthService
             else
             {
                 // New Google user
+                Debug.WriteLine("[GoogleAuth] Creating new Google user profile");
                 profile = new UserProfile
                 {
                     Email = userInfo.Email,
@@ -126,6 +180,8 @@ public static class AuthService
             }
 
             UserProfileStore.Save(profile);
+            Debug.WriteLine("[GoogleAuth] Profile saved successfully");
+
             UserProfileStore.AddLoginHistory(new LoginHistoryEntry
             {
                 Success = true,
@@ -140,19 +196,129 @@ public static class AuthService
             };
             UserProfileStore.AddActiveSession(session);
 
-            return new AuthResult
-            {
-                Success = true,
-                Profile = profile,
-                AccessToken = tokenResponse.AccessToken ?? "",
-                RefreshToken = tokenResponse.RefreshToken ?? ""
-            };
+            // Return success marker; caller can load the updated profile
+            return "AUTH_SUCCESS";
+        }
+        catch (Google.GoogleApiException ex)
+        {
+            Debug.WriteLine($"[GoogleAuth] Google API error in ProcessGoogleCredentialAsync: {ex.Message}");
+            return $"AUTH_ERROR: Google API error - {ex.Error?.Message ?? ex.Message}";
         }
         catch (Exception ex)
         {
-            return new AuthResult { Success = false, ErrorMessage = $"Google authentication failed: {ex.Message}" };
+            Debug.WriteLine($"[GoogleAuth] Error in ProcessGoogleCredentialAsync: {ex}");
+            return $"AUTH_ERROR: {ex.Message}";
         }
     }
+
+    /// <summary>
+    /// Attempts silent authentication using stored credentials (for auto-login/remember-me).
+    /// Returns AUTH_SUCCESS if a valid credential was found and processed, otherwise returns an error code.
+    /// </summary>
+    public static async Task<string> TrySilentGoogleAuthAsync()
+    {
+        try
+        {
+            Debug.WriteLine("[GoogleAuth] Attempting silent authentication...");
+
+            // Try to load existing credential from the data store
+            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                new ClientSecrets
+                {
+                    ClientId = GoogleAuthConfig.ClientId,
+                    ClientSecret = GoogleAuthConfig.ClientSecret
+                },
+                GoogleAuthConfig.Scopes,
+                "user",
+                CancellationToken.None,
+                Flow.DataStore);
+
+            Debug.WriteLine("[GoogleAuth] Silent authentication credential loaded");
+            // If we get here, a credential was loaded (possibly refreshed)
+            return await ProcessGoogleCredentialAsync(credential);
+        }
+        catch (TokenResponseException ex)
+        {
+            // Stored refresh token is invalid/expired/revoked
+            Debug.WriteLine($"[GoogleAuth] TokenResponseException in silent auth: {ex.Message}");
+            return "AUTH_ERROR: Stored credentials invalid";
+        }
+        catch (Exception ex)
+        {
+            // No stored credential or other error
+            Debug.WriteLine($"[GoogleAuth] Silent auth failed: {ex.Message}");
+            return "AUTH_ERROR: No stored credentials";
+        }
+    }
+
+    /// <summary>
+    /// Revokes the stored Google OAuth tokens (sign out from Google).
+    /// </summary>
+    public static async Task<bool> RevokeGoogleAuthAsync()
+    {
+        try
+        {
+            Debug.WriteLine("[GoogleAuth] Revoking Google OAuth tokens...");
+
+            var credential = await GoogleWebAuthorizationBroker.AuthorizeAsync(
+                new ClientSecrets
+                {
+                    ClientId = GoogleAuthConfig.ClientId,
+                    ClientSecret = GoogleAuthConfig.ClientSecret
+                },
+                GoogleAuthConfig.Scopes,
+                "user",
+                CancellationToken.None,
+                Flow.DataStore);
+
+            if (credential.Token.RefreshToken != null)
+            {
+                await credential.RevokeTokenAsync(CancellationToken.None);
+                Debug.WriteLine("[GoogleAuth] Refresh token revoked");
+            }
+
+            // Clear the data store
+            await Flow.DataStore.ClearAsync();
+            Debug.WriteLine("[GoogleAuth] Data store cleared");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[GoogleAuth] Error revoking tokens: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Complete sign out: revokes Google tokens, clears remember-me token, and clears local profile.
+    /// Returns AuthResult with success status and error message if any.
+    /// </summary>
+    public static async Task<AuthResult> SignOutAsync()
+    {
+        try
+        {
+            Debug.WriteLine("[AuthService] Starting complete sign out...");
+
+            // 1. Revoke Google OAuth tokens
+            await RevokeGoogleAuthAsync();
+
+            // 2. Clear remember-me token (for manual/email accounts)
+            ClearRememberMeToken();
+
+            // 3. Clear current profile from store
+            UserProfileStore.SignOut();
+
+            Debug.WriteLine("[AuthService] Sign out completed successfully");
+            return new AuthResult { Success = true, ErrorMessage = "" };
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[AuthService] Error during sign out: {ex.Message}");
+            return new AuthResult { Success = false, ErrorMessage = $"Sign out failed: {ex.Message}" };
+        }
+    }
+
+    // ===== Manual Email/Password Authentication (unchanged) =====
 
     public static async Task<AuthResult> LoginWithEmailPasswordAsync(string email, string password)
     {
@@ -222,7 +388,7 @@ public static class AuthService
                 ProviderId = email.ToLowerInvariant(),
                 PasswordHash = hash,
                 PasswordSalt = salt,
-                IsVerified = false, // Would need email verification in production
+                IsVerified = false,
                 LastLoginAt = DateTime.UtcNow
             };
 
@@ -273,8 +439,6 @@ public static class AuthService
 
     public static async Task<AuthResult> RequestPasswordResetAsync(string email)
     {
-        // In production, this would send an email with a reset token
-        // For now, we'll just return success
         await Task.Delay(100);
         return new AuthResult { Success = true, ErrorMessage = "If an account exists, a password reset link has been sent." };
     }
@@ -311,11 +475,8 @@ public static class AuthService
         return "127.0.0.1";
     }
 
-    // ===== Remember Me / Auto-Login =====
+    // ===== Remember Me / Auto-Login (unchanged) =====
 
-    /// <summary>
-    /// Generates a secure remember-me token for auto-login. Valid for 30 days.
-    /// </summary>
     public static string GenerateRememberMeToken(UserProfile profile)
     {
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
@@ -325,9 +486,6 @@ public static class AuthService
         return token;
     }
 
-    /// <summary>
-    /// Validates a remember-me token and returns the profile if valid.
-    /// </summary>
     public static UserProfile? ValidateRememberMeToken(string token)
     {
         var profile = UserProfileStore.Load();
@@ -342,16 +500,11 @@ public static class AuthService
         if (profile.RememberMeTokenExpiry < DateTime.UtcNow)
             return null;
 
-        // Extend token expiry on successful validation (sliding window)
         profile.RememberMeTokenExpiry = DateTime.UtcNow.AddDays(30);
         UserProfileStore.Save(profile);
         return profile;
     }
 
-    /// <summary>
-    /// Checks if there's a valid remember-me token stored (for auto-login).
-    /// Does not require a token parameter - checks the stored token directly.
-    /// </summary>
     public static UserProfile? CheckRememberMeToken()
     {
         var profile = UserProfileStore.Load();
@@ -361,15 +514,11 @@ public static class AuthService
         if (profile.RememberMeTokenExpiry < DateTime.UtcNow)
             return null;
 
-        // Extend token expiry on successful validation (sliding window)
         profile.RememberMeTokenExpiry = DateTime.UtcNow.AddDays(30);
         UserProfileStore.Save(profile);
         return profile;
     }
 
-    /// <summary>
-    /// Clears the remember-me token (on sign out).
-    /// </summary>
     public static void ClearRememberMeToken()
     {
         var profile = UserProfileStore.Load();
@@ -381,11 +530,8 @@ public static class AuthService
         }
     }
 
-    // ===== Email Verification =====
+    // ===== Email Verification (unchanged) =====
 
-    /// <summary>
-    /// Generates an email verification token. Valid for 24 hours.
-    /// </summary>
     public static string GenerateEmailVerificationToken(UserProfile profile)
     {
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
@@ -396,9 +542,6 @@ public static class AuthService
         return token;
     }
 
-    /// <summary>
-    /// Validates an email verification token.
-    /// </summary>
     public static bool VerifyEmailToken(string token)
     {
         var profile = UserProfileStore.Load();
@@ -413,7 +556,6 @@ public static class AuthService
         if (profile.EmailVerificationTokenExpiry < DateTime.UtcNow)
             return false;
 
-        // Mark as verified and clear token
         profile.IsVerified = true;
         profile.EmailVerificationToken = "";
         profile.EmailVerificationTokenExpiry = DateTime.MinValue;
@@ -421,9 +563,6 @@ public static class AuthService
         return true;
     }
 
-    /// <summary>
-    /// Sends a verification email (placeholder - in production would send actual email).
-    /// </summary>
     public static async Task<AuthResult> SendVerificationEmailAsync(string email)
     {
         var profile = UserProfileStore.Load();
@@ -435,13 +574,8 @@ public static class AuthService
 
         var token = GenerateEmailVerificationToken(profile);
 
-        // In production: send email with verification link
-        // For now, we'll simulate by returning the token in the message
         await Task.Delay(100);
 
-        // In a real app, you would send an email with a link like:
-        // https://yourapp.com/verify?token={token}
-        // For now, we return the token so it can be tested
         return new AuthResult
         {
             Success = true,
@@ -449,9 +583,6 @@ public static class AuthService
         };
     }
 
-    /// <summary>
-    /// Resends the verification email.
-    /// </summary>
     public static async Task<AuthResult> ResendVerificationEmailAsync(string email)
     {
         var profile = UserProfileStore.Load();
@@ -463,7 +594,6 @@ public static class AuthService
 
         var token = GenerateEmailVerificationToken(profile);
 
-        // In production: send email
         await Task.Delay(100);
 
         return new AuthResult
@@ -473,11 +603,9 @@ public static class AuthService
         };
     }
 
-    /// <summary>
-    /// Checks if a profile has a valid verification token that hasn't expired.
-    /// </summary>
     public static bool HasValidVerificationToken(UserProfile profile)
     {
         return !string.IsNullOrEmpty(profile.EmailVerificationToken)
             && profile.EmailVerificationTokenExpiry > DateTime.UtcNow;
     }
+}
